@@ -1640,6 +1640,9 @@
     <ClCompile Include="GS\Window\GSwxDialog.cpp">
       <Filter>System\Ps2\GS\Window</Filter>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\DX11\D3D.cpp">
+      <Filter>System\Ps2\GS\Renderers\Direct3D</Filter>
+    </ClCompile>
     <ClCompile Include="gui\wxAppWithHelpers.cpp">
       <Filter>AppHost</Filter>
     </ClCompile>
@@ -2744,6 +2747,9 @@
     </ClInclude>
     <ClInclude Include="GS\Window\GSwxDialog.h">
       <Filter>System\Ps2\GS\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="GS\Renderers\DX11\D3D.h">
+      <Filter>System\Ps2\GS\Renderers\Direct3D</Filter>
     </ClInclude>
     <ClInclude Include="gui\wxAppWithHelpers.h">
       <Filter>AppHost</Filter>
