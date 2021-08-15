@@ -177,7 +177,9 @@ namespace GSSettingsDialog
 		GSUIElementHolder m_ui;
 
 		wxBoxSizer* m_top_box;
+		wxChoice* m_renderer_select;
 		wxChoice* m_adapter_select;
+		wxArrayString m_adapter_arr_string;
 		RendererTab* m_renderer_panel;
 		HacksTab* m_hacks_panel;
 		DebugTab* m_debug_panel;
@@ -192,6 +194,9 @@ namespace GSSettingsDialog
 		void Save();
 		void Update();
 		void CallUpdate(wxCommandEvent& event);
+		void OnRendererChange(wxCommandEvent& event);
+		void PopulateAdapterList();
+		GSRendererType GetSelectedRendererType();
 	};
 
 } // namespace GSSettingsDialog
