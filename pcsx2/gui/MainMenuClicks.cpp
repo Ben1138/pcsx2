@@ -509,6 +509,9 @@ void MainEmuFrame::Menu_CdvdSource_Click(wxCommandEvent& event)
 		case MenuId_Src_Iso:
 			newsrc = CDVD_SourceType::Iso;
 			break;
+		case MenuId_Src_Folder:
+			newsrc = CDVD_SourceType::Folder;
+			break;
 		case MenuId_Src_Disc:
 			newsrc = CDVD_SourceType::Disc;
 			break;
