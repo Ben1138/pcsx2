@@ -22,7 +22,7 @@
 
 #include "PrecompiledHeader.h"
 
-#include "CDVDfolderReader.h"
+#include "CDVDdirReader.h"
 #include "AsyncFileReader.h"
 
 #include <cstring>
@@ -35,18 +35,18 @@ static int pmode, cdtype;
 static s32 layer1start = -1;
 static bool layer1searched = false;
 
-void CALLBACK FOLDERclose()
+void CALLBACK DIRclose()
 {
 	iso.Close();
 }
 
-s32 CALLBACK FOLDERopen(const char* pTitle)
+s32 CALLBACK DIRopen(const char* pTitle)
 {
-	FOLDERclose(); // just in case
+	DIRclose(); // just in case
 
 	if ((pTitle == NULL) || (pTitle[0] == 0))
 	{
-		Console.Error("CDVDiso Error: No filename specified.");
+		Console.Error("CDVDdir Error: No path specified.");
 		return -1;
 	}
 
@@ -79,7 +79,7 @@ s32 CALLBACK FOLDERopen(const char* pTitle)
 	return 0;
 }
 
-s32 CALLBACK FOLDERreadSubQ(u32 lsn, cdvdSubQ* subq)
+s32 CALLBACK DIRreadSubQ(u32 lsn, cdvdSubQ* subq)
 {
 	// fake it
 	u8 min, sec, frm;
@@ -103,7 +103,7 @@ s32 CALLBACK FOLDERreadSubQ(u32 lsn, cdvdSubQ* subq)
 	return 0;
 }
 
-s32 CALLBACK FOLDERgetTN(cdvdTN* Buffer)
+s32 CALLBACK DIRgetTN(cdvdTN* Buffer)
 {
 	Buffer->strack = 1;
 	Buffer->etrack = 1;
@@ -111,7 +111,7 @@ s32 CALLBACK FOLDERgetTN(cdvdTN* Buffer)
 	return 0;
 }
 
-s32 CALLBACK FOLDERgetTD(u8 Track, cdvdTD* Buffer)
+s32 CALLBACK DIRgetTD(u8 Track, cdvdTD* Buffer)
 {
 	if (Track == 0)
 	{
@@ -175,7 +175,7 @@ static void FindLayer1Start()
 }
 
 // Should return 0 if no error occurred, or -1 if layer detection FAILED.
-s32 CALLBACK FOLDERgetDualInfo(s32* dualType, u32* _layer1start)
+s32 CALLBACK DIRgetDualInfo(s32* dualType, u32* _layer1start)
 {
 	FindLayer1Start();
 
@@ -192,14 +192,14 @@ s32 CALLBACK FOLDERgetDualInfo(s32* dualType, u32* _layer1start)
 	return 0;
 }
 
-s32 CALLBACK FOLDERgetDiskType()
+s32 CALLBACK DIRgetDiskType()
 {
 	return cdtype;
 }
 
-s32 CALLBACK FOLDERgetTOC(void* toc)
+s32 CALLBACK DIRgetTOC(void* toc)
 {
-	u8 type = FOLDERgetDiskType();
+	u8 type = DIRgetDiskType();
 	u8* tocBuff = (u8*)toc;
 
 	//CDVD_LOG("CDVDgetTOC\n");
@@ -262,12 +262,12 @@ s32 CALLBACK FOLDERgetTOC(void* toc)
 		cdvdTN diskInfo;
 		cdvdTD trackInfo;
 		memset(tocBuff, 0, 1024);
-		if (FOLDERgetTN(&diskInfo) == -1)
+		if (DIRgetTN(&diskInfo) == -1)
 		{
 			diskInfo.etrack = 0;
 			diskInfo.strack = 1;
 		}
-		if (FOLDERgetTD(0, &trackInfo) == -1)
+		if (DIRgetTD(0, &trackInfo) == -1)
 			trackInfo.lsn = 0;
 
 		tocBuff[0] = 0x41;
@@ -289,7 +289,7 @@ s32 CALLBACK FOLDERgetTOC(void* toc)
 
 		for (i = diskInfo.strack; i <= diskInfo.etrack; i++)
 		{
-			err = FOLDERgetTD(i, &trackInfo);
+			err = DIRgetTD(i, &trackInfo);
 			lba_to_msf(trackInfo.lsn, &min, &sec, &frm);
 			tocBuff[i * 10 + 30] = trackInfo.type;
 			tocBuff[i * 10 + 32] = err == -1 ? 0 : itob(i); //number
@@ -304,7 +304,7 @@ s32 CALLBACK FOLDERgetTOC(void* toc)
 	return 0;
 }
 
-s32 CALLBACK FOLDERreadSector(u8* tempbuffer, u32 lsn, int mode)
+s32 CALLBACK DIRreadSector(u8* tempbuffer, u32 lsn, int mode)
 {
 	static u8 cdbuffer[CD_FRAMESIZE_RAW] = {0};
 
@@ -355,7 +355,7 @@ s32 CALLBACK FOLDERreadSector(u8* tempbuffer, u32 lsn, int mode)
 	return 0;
 }
 
-s32 CALLBACK FOLDERreadTrack(u32 lsn, int mode)
+s32 CALLBACK DIRreadTrack(u32 lsn, int mode)
 {
 	int _lsn = lsn;
 
@@ -369,7 +369,7 @@ s32 CALLBACK FOLDERreadTrack(u32 lsn, int mode)
 	return 0;
 }
 
-s32 CALLBACK FOLDERgetBuffer(u8* buffer)
+s32 CALLBACK DIRgetBuffer(u8* buffer)
 {
 	return iso.FinishRead3(buffer, pmode);
 }
@@ -380,47 +380,47 @@ s32 CALLBACK FOLDERgetBuffer(u8* buffer)
 //	return pbuffer;
 //}
 
-s32 CALLBACK FOLDERgetTrayStatus()
+s32 CALLBACK DIRgetTrayStatus()
 {
 	return CDVD_TRAY_CLOSE;
 }
 
-s32 CALLBACK FOLDERctrlTrayOpen()
+s32 CALLBACK DIRctrlTrayOpen()
 {
 	return 0;
 }
-s32 CALLBACK FOLDERctrlTrayClose()
-{
-	return 0;
-}
-
-s32 CALLBACK FOLDERdummyS32()
+s32 CALLBACK DIRctrlTrayClose()
 {
 	return 0;
 }
 
-void CALLBACK FOLDERnewDiskCB(void (*/* callback */)())
+s32 CALLBACK DIRdummyS32()
+{
+	return 0;
+}
+
+void CALLBACK DIRnewDiskCB(void (*/* callback */)())
 {
 }
 
 CDVD_API CDVDapi_Folder =
 	{
-		FOLDERclose,
+		DIRclose,
 
-		FOLDERopen,
-		FOLDERreadTrack,
-		FOLDERgetBuffer,
-		FOLDERreadSubQ,
-		FOLDERgetTN,
-		FOLDERgetTD,
-		FOLDERgetTOC,
-		FOLDERgetDiskType,
-		FOLDERdummyS32, // trayStatus
-		FOLDERdummyS32, // trayOpen
-		FOLDERdummyS32, // trayClose
+		DIRopen,
+		DIRreadTrack,
+		DIRgetBuffer,
+		DIRreadSubQ,
+		DIRgetTN,
+		DIRgetTD,
+		DIRgetTOC,
+		DIRgetDiskType,
+		DIRdummyS32, // trayStatus
+		DIRdummyS32, // trayOpen
+		DIRdummyS32, // trayClose
 
-		FOLDERnewDiskCB,
+		DIRnewDiskCB,
 
-		FOLDERreadSector,
-		FOLDERgetDualInfo,
+		DIRreadSector,
+		DIRgetDualInfo,
 };

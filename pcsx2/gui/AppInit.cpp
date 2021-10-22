@@ -219,6 +219,7 @@ void Pcsx2App::OnInitCmdLine(wxCmdLineParser& parser)
 
 	parser.AddOption(wxEmptyString, L"elf", _("executes an ELF image"), wxCMD_LINE_VAL_STRING);
 	parser.AddOption(wxEmptyString, L"irx", _("executes an IRX image"), wxCMD_LINE_VAL_STRING);
+	parser.AddOption(wxEmptyString, L"dir", _("executes in a directory"), wxCMD_LINE_VAL_STRING);
 	parser.AddSwitch(wxEmptyString, L"nodisc", _("boots an empty DVD tray; use to enter the PS2 system menu"));
 	parser.AddSwitch(wxEmptyString, L"usecd", _("boots from the disc drive (overrides IsoFile parameter)"));
 
@@ -309,16 +310,21 @@ bool Pcsx2App::OnCmdLineParsed(wxCmdLineParser& parser)
 	}
 	else
 	{
-		wxString elf_file;
-		if (parser.Found(L"elf", &elf_file) && !elf_file.IsEmpty())
+		wxString path;
+		if (parser.Found(L"elf", &path) && !path.IsEmpty())
 		{
 			Startup.SysAutoRunElf = true;
-			Startup.ElfFile = elf_file;
+			Startup.ElfFile = path;
 		}
-		else if (parser.Found(L"irx", &elf_file) && !elf_file.IsEmpty())
+		else if (parser.Found(L"irx", &path) && !path.IsEmpty())
 		{
 			Startup.SysAutoRunIrx = true;
-			Startup.ElfFile = elf_file;
+			Startup.ElfFile = path;
+		}
+		else if (parser.Found(L"dir", &path) && !path.IsEmpty())
+		{
+			Startup.SysAutoRunDir = true;
+			Startup.DirectoryPath = path;
 		}
 	}
 
@@ -467,6 +473,14 @@ bool Pcsx2App::OnInit()
 			g_Conf->CdvdSource = Startup.CdvdSource;
 			if (Startup.CdvdSource == CDVD_SourceType::Iso)
 				SysUpdateIsoSrcFile(Startup.IsoFile);
+			EmuConfig.CurrentGameArgs = StringUtil::wxStringToUTF8String(Startup.GameLaunchArgs);
+		}
+		else if (Startup.SysAutoRunDir)
+		{
+			g_Conf->EmuOptions.UseBOOT2Injection = !Startup.NoFastBoot;
+			g_Conf->CdvdSource = Startup.CdvdSource;
+			if (Startup.CdvdSource == CDVD_SourceType::Directory)
+				SysUpdateDirSrcPath(Startup.DirectoryPath);
 			sApp.SysExecute(Startup.CdvdSource);
 			EmuConfig.CurrentGameArgs = StringUtil::wxStringToUTF8String(Startup.GameLaunchArgs);
 		}

@@ -94,7 +94,7 @@ enum MenuIdentifiers
 	// Run SubSection
 	MenuId_Cdvd_Source,
 	MenuId_Src_Iso,
-	MenuId_Src_Folder,
+	MenuId_Src_Directory,
 	MenuId_Src_Disc,
 	MenuId_Src_NoDisc,
 	MenuId_Boot_Iso, // Opens submenu with Iso browser, and recent isos.
@@ -321,7 +321,7 @@ public:
 	// Specifies the Iso file to boot; used only if SysAutoRun is enabled and CdvdSource
 	// is set to ISO.
 	wxString IsoFile;
-
+	wxString DirectoryPath;
 	wxString ElfFile;
 
 	wxString GameLaunchArgs;
@@ -331,6 +331,7 @@ public:
 
 	// Indicates if PCSX2 should autorun the configured CDVD source and/or ISO file.
 	bool SysAutoRun;
+	bool SysAutoRunDir;
 	bool SysAutoRunElf;
 	bool SysAutoRunIrx;
 
@@ -342,6 +343,7 @@ public:
 		NoFastBoot = false;
 		SysAutoRun = false;
 		SysAutoRunElf = false;
+		SysAutoRunDir = false;
 		SysAutoRunIrx = false;
 		CdvdSource = CDVD_SourceType::NoDisc;
 	}
@@ -768,6 +770,7 @@ extern pxDoAssertFnType AppDoAssert;
 
 extern bool SysHasValidState();
 extern void SysUpdateIsoSrcFile(const wxString& newIsoFile);
+extern void SysUpdateDirSrcPath(const wxString& newDirPath);
 extern void SysUpdateDiscSrcDrive(const wxString& newDiscDrive);
 extern void SysStatus(const wxString& text);
 

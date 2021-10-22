@@ -578,9 +578,13 @@ void AppConfig::LoadSaveRootItems(IniInterface& ini)
 	IniEntry(Toolbar_ImageSize);
 	IniEntry(Toolbar_ShowLabels);
 
-	wxFileName res(CurrentIso);
-	ini.Entry(L"CurrentIso", res, res, ini.IsLoading() || IsPortable());
-	CurrentIso = res.GetFullPath();
+	wxFileName resIso(CurrentIso);
+	ini.Entry(L"CurrentIso", resIso, resIso, ini.IsLoading() || IsPortable());
+	CurrentIso = resIso.GetFullPath();
+
+	wxDirName resDir(CurrentDir);
+	ini.Entry(L"CurrentDir", resDir, resDir, ini.IsLoading() || IsPortable());
+	resDir.MakeAbsolute(CurrentDir);
 
 	ini.Entry(wxT("CurrentBlockdump"), EmuConfig.CurrentBlockdump, EmuConfig.CurrentBlockdump);
 	IniEntry(CurrentELF);
@@ -1178,6 +1182,11 @@ static void LoadUiSettings()
 		g_Conf->CurrentIso.clear();
 	}
 
+	if (!wxDirExists(g_Conf->CurrentDir))
+	{
+		g_Conf->CurrentDir.clear();
+	}
+
 	sApp.DispatchUiSettingsEvent(loader);
 }
 
@@ -1217,6 +1226,11 @@ static void SaveUiSettings()
 	if (!wxFile::Exists(g_Conf->CurrentIso))
 	{
 		g_Conf->CurrentIso.clear();
+	}
+
+	if (!wxDirExists(g_Conf->CurrentDir))
+	{
+		g_Conf->CurrentDir.clear();
 	}
 
 	sApp.GetRecentIsoManager().Add(g_Conf->CurrentIso);

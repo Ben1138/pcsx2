@@ -509,8 +509,8 @@ void MainEmuFrame::Menu_CdvdSource_Click(wxCommandEvent& event)
 		case MenuId_Src_Iso:
 			newsrc = CDVD_SourceType::Iso;
 			break;
-		case MenuId_Src_Folder:
-			newsrc = CDVD_SourceType::Folder;
+		case MenuId_Src_Directory:
+			newsrc = CDVD_SourceType::Directory;
 			break;
 		case MenuId_Src_Disc:
 			newsrc = CDVD_SourceType::Disc;
@@ -581,6 +581,8 @@ void MainEmuFrame::Menu_IsoClear_Click(wxCommandEvent& event)
 		// If the CDVD mode is not ISO, or the system isn't running, wipe the CurrentIso field in INI file
 		if (g_Conf->CdvdSource != CDVD_SourceType::Iso || !SysHasValidState())
 			SysUpdateIsoSrcFile("");
+		if (g_Conf->CdvdSource != CDVD_SourceType::Directory || !SysHasValidState())
+			SysUpdateDirSrcPath("");
 		wxGetApp().GetRecentIsoManager().Clear();
 		AppSaveSettings();
 	}

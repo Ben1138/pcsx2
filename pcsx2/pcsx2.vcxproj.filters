@@ -1672,7 +1672,7 @@
     <ClCompile Include="gui\pxWindowTextWriter.cpp">
       <Filter>AppHost</Filter>
     </ClCompile>
-    <ClCompile Include="CDVD\CDVDfolderReader.cpp">
+    <ClCompile Include="CDVD\CDVDdirReader.cpp">
       <Filter>System\Ps2\Iop\CDVD</Filter>
     </ClCompile>
   </ItemGroup>
@@ -2782,7 +2782,7 @@
     <ClInclude Include="gui\pxStaticText.h">
       <Filter>AppHost</Filter>
     </ClInclude>
-    <ClInclude Include="CDVD\CDVDfolderReader.h">
+    <ClInclude Include="CDVD\CDVDdirReader.h">
       <Filter>System\Ps2\Iop\CDVD</Filter>
     </ClInclude>
   </ItemGroup>

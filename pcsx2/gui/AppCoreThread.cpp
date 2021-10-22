@@ -218,15 +218,18 @@ void Pcsx2App::SysApplySettings()
 
 	const CDVD_SourceType cdvdsrc(g_Conf->CdvdSource);
 	const std::string currentIso(StringUtil::wxStringToUTF8String(g_Conf->CurrentIso));
+	const std::string currentDir(StringUtil::wxStringToUTF8String(g_Conf->CurrentDir));
 	const std::string currentDisc(StringUtil::wxStringToUTF8String(g_Conf->Folders.RunDisc));
 	if (cdvdsrc != CDVDsys_GetSourceType() ||
 			CDVDsys_GetFile(CDVD_SourceType::Iso) != currentIso ||
+			CDVDsys_GetFile(CDVD_SourceType::Directory) != currentDir ||
 			CDVDsys_GetFile(CDVD_SourceType::Disc) != currentDisc)
 	{
 		CoreThread.ResetCdvd();
 	}
 
 	CDVDsys_SetFile(CDVD_SourceType::Iso, currentIso);
+	CDVDsys_SetFile(CDVD_SourceType::Directory, currentDir);
 	CDVDsys_SetFile(CDVD_SourceType::Disc, currentDisc);
 }
 

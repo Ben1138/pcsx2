@@ -111,8 +111,8 @@ void MainEmuFrame::UpdateCdvdSrcSelection()
 		case CDVD_SourceType::Iso:
 			cdsrc = MenuId_Src_Iso;
 			break;
-		case CDVD_SourceType::Folder:
-			cdsrc = MenuId_Src_Folder;
+		case CDVD_SourceType::Directory:
+			cdsrc = MenuId_Src_Directory;
 			break;
 		case CDVD_SourceType::Disc:
 			cdsrc = MenuId_Src_Disc;
@@ -279,7 +279,7 @@ void MainEmuFrame::ConnectMenus()
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_IsoBrowse_Click, this, MenuId_IsoBrowse);
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_IsoClear_Click, this, MenuId_IsoClear);
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_CdvdSource_Click, this, MenuId_Src_Iso);
-	Bind(wxEVT_MENU, &MainEmuFrame::Menu_CdvdSource_Click, this, MenuId_Src_Folder);
+	Bind(wxEVT_MENU, &MainEmuFrame::Menu_CdvdSource_Click, this, MenuId_Src_Directory);
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_CdvdSource_Click, this, MenuId_Src_Disc);
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_CdvdSource_Click, this, MenuId_Src_NoDisc);
 	Bind(wxEVT_MENU, &MainEmuFrame::Menu_Ask_On_Boot_Click, this, MenuId_Ask_On_Booting);
@@ -444,7 +444,7 @@ void MainEmuFrame::CreateCdvdMenu()
 
 	m_menuCDVD.AppendSeparator();
 	m_menuCDVD.Append(MenuId_Src_Iso, _("&ISO"), _("Makes the specified ISO image the CDVD source."), wxITEM_RADIO);
-	m_menuCDVD.Append(MenuId_Src_Folder, _("&Folder"), _("Makes the specified Folder the CDVD source."), wxITEM_RADIO);
+	m_menuCDVD.Append(MenuId_Src_Directory, _("&Directory"), _("Makes the specified directory the CDVD source."), wxITEM_RADIO);
 	m_menuCDVD.Append(MenuId_Src_Disc, _("&Disc"), _("Uses a disc drive as the CDVD source."), wxITEM_RADIO);
 	m_menuCDVD.Append(MenuId_Src_NoDisc, _("&No disc"), _("Use this to boot into your virtual PS2's BIOS configuration."), wxITEM_RADIO);
 

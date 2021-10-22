@@ -42,7 +42,7 @@ CDVD_API* CDVD = NULL;
 const wxChar* CDVD_SourceLabels[] =
 	{
 		L"ISO",
-		L"Folder",
+		L"Directory",
 		L"Disc",
 		L"NoDisc",
 		NULL};
@@ -338,7 +338,7 @@ void CDVDsys_ChangeSource(CDVD_SourceType type)
 			CDVD = &CDVDapi_Iso;
 			break;
 
-		case CDVD_SourceType::Folder:
+		case CDVD_SourceType::Directory:
 			CDVD = &CDVDapi_Folder;
 			break;
 

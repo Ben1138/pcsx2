@@ -115,10 +115,10 @@ typedef void(CALLBACK* _CDVDnewDiskCB)(void (*callback)());
 
 enum class CDVD_SourceType : uint8_t
 {
-	Iso,    // use built in ISO api
-	Folder, // use built in Folder api
-	Disc,   // use built in Disc api
-	NoDisc, // use built in CDVDnull
+	Iso,       // use built in ISO api
+	Directory, // use built in Directory api
+	Disc,      // use built in Disc api
+	NoDisc,    // use built in CDVDnull
 };
 
 struct CDVD_API

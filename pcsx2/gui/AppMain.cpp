@@ -1018,6 +1018,7 @@ protected:
 		// and we _only_ read symbols if the map is empty
 		CDVDsys_SetFile(CDVD_SourceType::Disc, StringUtil::wxStringToUTF8String(g_Conf->Folders.RunDisc) );
 		CDVDsys_SetFile(CDVD_SourceType::Iso, StringUtil::wxStringToUTF8String(m_UseELFOverride ? m_elf_override : g_Conf->CurrentIso) );
+		CDVDsys_SetFile(CDVD_SourceType::Directory, StringUtil::wxStringToUTF8String(g_Conf->CurrentDir));
 		if( m_UseCDVDsrc )
 			CDVDsys_ChangeSource( m_cdvdsrc_type );
 		else if( CDVD == NULL )
@@ -1074,6 +1075,13 @@ void SysStatus( const wxString& text )
 void SysUpdateIsoSrcFile( const wxString& newIsoFile )
 {
 	g_Conf->CurrentIso = newIsoFile;
+	sMainFrame.UpdateStatusBar();
+	sMainFrame.UpdateCdvdSrcSelection();
+}
+
+void SysUpdateDirSrcPath(const wxString& newDirPath)
+{
+	g_Conf->CurrentDir = newDirPath;
 	sMainFrame.UpdateStatusBar();
 	sMainFrame.UpdateCdvdSrcSelection();
 }
