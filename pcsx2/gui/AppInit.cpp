@@ -325,6 +325,7 @@ bool Pcsx2App::OnCmdLineParsed(wxCmdLineParser& parser)
 		{
 			Startup.SysAutoRunDir = true;
 			Startup.DirectoryPath = path;
+			Startup.CdvdSource = CDVD_SourceType::Directory;
 		}
 	}
 

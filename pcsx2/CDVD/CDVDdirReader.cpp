@@ -24,55 +24,214 @@
 
 #include "CDVDdirReader.h"
 #include "AsyncFileReader.h"
+#include <wx/fswatcher.h>
 
 #include <cstring>
 #include <array>
 
-static InputIsoFile iso;
+// https://wiki.osdev.org/ISO_9660
+// Primary Volume Descriptor 
+struct ISO_9660_PVD
+{
+	u8   m_TypeCode;
+	u8   m_StandardIdentifier[5];
+	u8   m_Version;
+	u8   _unused1;
+	u8   m_SystemIdentifier[32];
+	u8   m_VolumeIdentifier[32];
+	u8   _unsued2[8];
+	s32  m_VolumeSpaceSize_LSB;
+	s32  m_VolumeSpaceSize_MSB;
+	u8   _unsued3[32];
+	s16  m_VolumeSetSize_LSB;
+	s16  m_VolumeSetSize_MSB;
+	s16  m_VolumeSequenceNumber_LSB;
+	s16  m_VolumeSequenceNumber_MSB;
+	s16  m_LogicalBlockSize_LSB;
+	s16  m_LogicalBlockSize_MSB;
+	s32  m_PathTableSize_LSB;
+	s32  m_PathTableSize_MSB;
+	s32  m_LPathTableSector_LSB;
+	s32  m_OptionalLPathTableSector_LSB;
+	s32  m_MPathTableSector_MSB;
+	s32  m_OptionalMPathTableSector_MSB;
+	u8   m_RootDirectoryEntry[34];
+	u8   m_VolumeSetIdentifier[128];
+	u8   m_PublisherIdentifier[128];
+	u8   m_DataPreparerIdentifier[128];
+	u8   m_ApplicationIdentifier[128];
+	u8   m_CopyrightFileIdentifier[37];
+	u8   m_AbstractFileIdentifier[37];
+	u8   m_BibliographicFileIdentifier[37];
+	u8   m_CreationDateTime[17];
+	u8   m_ModificationDateTime[17];
+	u8   m_ExpirationDateTime[17];
+	u8   m_EffectiveDateTime[17];
+	u8   m_FileStructureVersion;
+};
+
+constexpr u16 ISO_BLOCK_SIZE = 2048;
+
+// first two sectors of ISO emulation
+static u8 ISO_header[ISO_BLOCK_SIZE * 2];
+
+static wxFileSystemWatcher watcher;
 
 static int pmode, cdtype;
 
 static s32 layer1start = -1;
 static bool layer1searched = false;
 
-void CALLBACK DIRclose()
+s16 swap_s16(s16 val)
 {
-	iso.Close();
+	return (val << 8) | ((val >> 8) & 0xFF);
 }
 
-s32 CALLBACK DIRopen(const char* pTitle)
+s32 swap_s32(s32 val)
+{
+	val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
+	return (val << 16) | ((val >> 16) & 0xFFFF);
+}
+
+s16 as_little(s16 val)
+{
+	s16 test = 1;
+	if (((u8*)&test)[0] == 0)
+	{
+		return swap_s16(val);
+	}
+	return val;
+}
+s16 as_big(s16 val)
+{
+	s16 test = 1;
+	if (((u8*)&test)[0] == 1)
+	{
+		return swap_s16(val);
+	}
+	return val;
+}
+
+s32 as_little(s32 val)
+{
+	s32 test = 1;
+	if (((u8*)&test)[0] == 0)
+	{
+		return swap_s32(val);
+	}
+	return val;
+}
+s32 as_big(s32 val)
+{
+	s32 test = 1;
+	if (((u8*)&test)[0] == 1)
+	{
+		return swap_s32(val);
+	}
+	return val;
+}
+
+void fill_str(u8* dst, u16 dstSize, const char* str, u8 paddingChar=0x20)
+{
+	size_t len = strlen(str);
+	memcpy(dst, str, len);
+	memset(dst + len, paddingChar, dstSize - len);
+}
+
+void CALLBACK DIRclose()
+{
+	watcher.RemoveAll();
+}
+
+s32 CALLBACK DIRopen(const char* pPath)
 {
 	DIRclose(); // just in case
 
-	if ((pTitle == NULL) || (pTitle[0] == 0))
+	if ((pPath == NULL) || (pPath[0] == 0))
 	{
 		Console.Error("CDVDdir Error: No path specified.");
 		return -1;
 	}
 
-	try
+	wxString path = pPath;	
+	if (!wxDir::Exists(path))
 	{
-		iso.Open(fromUTF8(pTitle));
-	}
-	catch (BaseException& ex)
-	{
-		Console.Error(ex.FormatDiagnosticMessage());
+		Console.Error("CDVDdir Error: Directory '%s' does not exist!", pPath);
+		DIRclose();
 		return -1;
 	}
 
-	switch (iso.GetType())
+	if (!watcher.Add(path))
 	{
-		case ISOTYPE_DVD:
-			cdtype = CDVD_TYPE_PS2DVD;
-			break;
-		case ISOTYPE_AUDIO:
-			cdtype = CDVD_TYPE_CDDA;
-			break;
-		default:
-			cdtype = CDVD_TYPE_PS2CD;
-			break;
+		Console.Error("CDVDdir Error: Failed to watch directory path '%s'!", pPath);
+		DIRclose();
+		return -1;
 	}
 
+	wxArrayString files;
+	size_t numFiles = wxDir::GetAllFiles(path, &files);
+	if (numFiles == 0)
+	{
+		Console.Error("CDVDdir Error: Directory '%s' doesn't contain any files!", pPath);
+		DIRclose();
+		return -1;
+	}
+
+	memset(ISO_header, 0, sizeof(ISO_header));
+	ISO_9660_PVD* pvd = (ISO_9660_PVD*)&ISO_header[0];
+
+	pvd->m_TypeCode = 1;
+	memcpy(pvd->m_StandardIdentifier, "CD001", 5);
+	pvd->m_Version = 1;
+
+	fill_str(pvd->m_SystemIdentifier, 32, "PLAYSTATION");
+	fill_str(pvd->m_VolumeIdentifier, 32, "1");
+
+	// number of blocks (sectors)
+	pvd->m_VolumeSpaceSize_LSB = as_little((s32)4096);
+	pvd->m_VolumeSpaceSize_MSB = as_big((s32)4096);
+
+	// number of discs
+	pvd->m_VolumeSetSize_LSB = as_little((s16)1);
+	pvd->m_VolumeSetSize_MSB = as_big((s16)1);
+
+	// number of this disc
+	pvd->m_VolumeSequenceNumber_LSB = as_little((s16)1);
+	pvd->m_VolumeSequenceNumber_MSB = as_big((s16)1);
+
+	// block (sector) size
+	pvd->m_LogicalBlockSize_LSB = as_little((s16)2048);
+	pvd->m_LogicalBlockSize_MSB = as_big((s16)2048);
+
+
+	pvd->m_PathTableSize_LSB;
+	pvd->m_PathTableSize_MSB;
+	pvd->m_LPathTableSector_LSB;
+	pvd->m_OptionalLPathTableSector_LSB;
+	pvd->m_MPathTableSector_MSB;
+	pvd->m_OptionalMPathTableSector_MSB;
+	pvd->m_RootDirectoryEntry[34];
+	pvd->m_VolumeSetIdentifier[128];
+	pvd->m_PublisherIdentifier[128];
+	pvd->m_DataPreparerIdentifier[128];
+	pvd->m_ApplicationIdentifier[128];
+	pvd->m_CopyrightFileIdentifier[37];
+	pvd->m_AbstractFileIdentifier[37];
+	pvd->m_BibliographicFileIdentifier[37];
+	pvd->m_CreationDateTime[17];
+	pvd->m_ModificationDateTime[17];
+	pvd->m_ExpirationDateTime[17];
+	pvd->m_EffectiveDateTime[17];
+	pvd->m_FileStructureVersion;
+
+	for (size_t i = 0; i < numFiles; ++i)
+	{
+		wxString file = files[i];
+		Console.WriteLn("Found File: %s", file.c_str().AsChar());
+	}
+
+
+	cdtype = CDVD_TYPE_PS2DVD;
 	layer1start = -1;
 	layer1searched = false;
 
@@ -115,7 +274,7 @@ s32 CALLBACK DIRgetTD(u8 Track, cdvdTD* Buffer)
 {
 	if (Track == 0)
 	{
-		Buffer->lsn = iso.GetBlockCount();
+		//Buffer->lsn = iso.GetBlockCount();
 	}
 	else
 	{
@@ -129,8 +288,8 @@ s32 CALLBACK DIRgetTD(u8 Track, cdvdTD* Buffer)
 static bool testForPrimaryVolumeDescriptor(const std::array<u8, CD_FRAMESIZE_RAW>& buffer)
 {
 	const std::array<u8, 6> identifier = {1, 'C', 'D', '0', '0', '1'};
-
-	return std::equal(identifier.begin(), identifier.end(), buffer.begin() + iso.GetBlockOffset());
+	return false;
+	//return std::equal(identifier.begin(), identifier.end(), buffer.begin() + iso.GetBlockOffset());
 }
 
 static void FindLayer1Start()
@@ -143,7 +302,7 @@ static void FindLayer1Start()
 	std::array<u8, CD_FRAMESIZE_RAW> buffer;
 
 	// The ISO9660 primary volume descriptor for layer 0 is located at sector 16
-	iso.ReadSync(buffer.data(), 16);
+	//iso.ReadSync(buffer.data(), 16);
 	if (!testForPrimaryVolumeDescriptor(buffer))
 	{
 		Console.Error("isoFile: Invalid layer0 Primary Volume Descriptor");
@@ -152,16 +311,16 @@ static void FindLayer1Start()
 
 	// The volume space size (sector count) is located at bytes 80-87 - 80-83
 	// is the little endian size, 84-87 is the big endian size.
-	const int offset = iso.GetBlockOffset();
+	const int offset = 0;//iso.GetBlockOffset();
 	uint blockresult = buffer[offset + 80] + (buffer[offset + 81] << 8) + (buffer[offset + 82] << 16) + (buffer[offset + 83] << 24);
 
 	// If the ISO sector count is larger than the volume size, then we should
 	// have a dual layer DVD. Layer 1 is on a different volume.
-	if (blockresult < iso.GetBlockCount())
+	if (blockresult < 0)//iso.GetBlockCount())
 	{
 		// The layer 1 start LSN contains the primary volume descriptor for layer 1.
 		// The check might be a bit unnecessary though.
-		if (iso.ReadSync(buffer.data(), blockresult) == -1)
+		//if (iso.ReadSync(buffer.data(), blockresult) == -1)
 			return;
 
 		if (!testForPrimaryVolumeDescriptor(buffer))
@@ -182,7 +341,7 @@ s32 CALLBACK DIRgetDualInfo(s32* dualType, u32* _layer1start)
 	if (layer1start < 0)
 	{
 		*dualType = 0;
-		*_layer1start = iso.GetBlockCount();
+		*_layer1start = 0;//iso.GetBlockCount();
 	}
 	else
 	{
@@ -310,18 +469,18 @@ s32 CALLBACK DIRreadSector(u8* tempbuffer, u32 lsn, int mode)
 
 	int _lsn = lsn;
 
-	if (_lsn < 0)
-		lsn = iso.GetBlockCount() + _lsn;
-	if (lsn >= iso.GetBlockCount())
-		return -1;
+	//if (_lsn < 0)
+	//	lsn = iso.GetBlockCount() + _lsn;
+	//if (lsn >= iso.GetBlockCount())
+	//	return -1;
 
 	if (mode == CDVD_MODE_2352)
 	{
-		iso.ReadSync(tempbuffer, lsn);
+		//iso.ReadSync(tempbuffer, lsn);
 		return 0;
 	}
 
-	iso.ReadSync(cdbuffer, lsn);
+	//iso.ReadSync(cdbuffer, lsn);
 
 
 	u8* pbuffer = cdbuffer;
@@ -359,10 +518,10 @@ s32 CALLBACK DIRreadTrack(u32 lsn, int mode)
 {
 	int _lsn = lsn;
 
-	if (_lsn < 0)
-		lsn = iso.GetBlockCount() + _lsn;
+	//if (_lsn < 0)
+	//	lsn = iso.GetBlockCount() + _lsn;
 
-	iso.BeginRead2(lsn);
+	//iso.BeginRead2(lsn);
 
 	pmode = mode;
 
@@ -371,7 +530,8 @@ s32 CALLBACK DIRreadTrack(u32 lsn, int mode)
 
 s32 CALLBACK DIRgetBuffer(u8* buffer)
 {
-	return iso.FinishRead3(buffer, pmode);
+	return 0;
+	//return iso.FinishRead3(buffer, pmode);
 }
 
 //u8* CALLBACK ISOgetBuffer()
