@@ -21,5 +21,6 @@
 #include "IopCommon.h"
 #include "IsoFileFormats.h"
 #include "CDVDaccess.h"
+#include "GS.h"
 
 #endif

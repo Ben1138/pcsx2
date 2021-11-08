@@ -28,8 +28,18 @@
 
 #include <cstring>
 #include <array>
+#include <map>
 
 // https://wiki.osdev.org/ISO_9660
+
+#define ISO_FLAG_HIDDEN               0b00000001
+#define ISO_FLAG_DIR                  0b00000010
+#define ISO_FLAG_ASSOCIATED_FILE      0b00000100
+#define ISO_FLAG_EXTENDED_FORMAT      0b00001000
+#define ISO_FLAG_EXTENDED_OWNER_GROUP 0b00010000
+#define ISO_FLAG_EXTENDED_MULTI       0b10000000
+
+#pragma pack(push, 1)
 // Primary Volume Descriptor 
 struct ISO_9660_PVD
 {
@@ -70,10 +80,74 @@ struct ISO_9660_PVD
 	u8   m_FileStructureVersion;
 };
 
+// Path Table Entry
+struct ISO_9660_PTE
+{
+	u8  m_DirectoryIdentifierLength;
+	u8  m_ExtendedAttributeRecordLength;
+	u32 m_ExtendLocation;
+	u16 m_ParentDirectoryIndex;
+
+	// - string of variable length
+	// - optional padding of 0x00 to make struct length even
+};
+
+// Directory Record Entry, max size is 255
+struct ISO_9660_DRE
+{
+	u8 m_EntryLength;
+	u8 m_m_ExtendedAttributeRecordLength;
+	u32 m_ExtendLocation_LSB;
+	u32 m_ExtendLocation_MSB;
+
+	u32 m_DataLength_LSB;
+	u32 m_DataLength_MSB;
+
+	u8 m_DateYear; // Since 1900
+	u8 m_DateMonth;
+	u8 m_DateDay;
+	u8 m_DateHour;
+	u8 m_DateMinute;
+	u8 m_DateSecond;
+	s8 m_DateTimeZone; // Offset from GMT in 15 minute intervals from -48 (West) to +52 (East). 
+
+	u8 m_FileFlags; // ISO_FLAG_*
+	u8 m_FileUnitSize; // For files recorded in interleaved mode, zero otherwise. 
+	u8 m_InterleaveGapSize; // For files recorded in interleaved mode, zero otherwise.
+
+	u16 m_VolumeSequenceNumber_LSB;
+	u16 m_VolumeSequenceNumber_MSB;
+
+	u8 m_FileIdentifierLength;
+	// - string of variable length
+	// - optional padding of 0x00 to make struct length even
+};
+#pragma pack(pop)
+
+struct TreeNode
+{
+	wxString Name;
+	wxString Path;
+	bool IsDir = false;
+	size_t FileSize;
+	std::vector<TreeNode> Children;
+};
+
+
 constexpr u16 ISO_BLOCK_SIZE = 2048;
 
-// first two sectors of ISO emulation
-static u8 ISO_header[ISO_BLOCK_SIZE * 2];
+// ISO Emulation Sectors:
+//   0-15 : Empty
+//   16   : Primary Volume Descriptor
+//   17   : Volume Descriptor Set Terminator
+//   18   : Path Table LSB, padding empty sectors
+//   19   : Path Table MSB, padding empty sectors
+//   20   : Root Directory Record Entry
+
+static u8 ISO_header[4][ISO_BLOCK_SIZE];
+static u8* ISO_dir_sectors = nullptr;
+static s32 ISO_sector_count;
+static std::map<s32, wxString> ISO_sector_to_path;
 
 static wxFileSystemWatcher watcher;
 
@@ -93,7 +167,7 @@ s32 swap_s32(s32 val)
 	return (val << 16) | ((val >> 16) & 0xFFFF);
 }
 
-s16 as_little(s16 val)
+s16 as_lil(s16 val)
 {
 	s16 test = 1;
 	if (((u8*)&test)[0] == 0)
@@ -112,7 +186,7 @@ s16 as_big(s16 val)
 	return val;
 }
 
-s32 as_little(s32 val)
+s32 as_lil(s32 val)
 {
 	s32 test = 1;
 	if (((u8*)&test)[0] == 0)
@@ -138,16 +212,155 @@ void fill_str(u8* dst, u16 dstSize, const char* str, u8 paddingChar=0x20)
 	memset(dst + len, paddingChar, dstSize - len);
 }
 
+bool is_strD(const wxString& str)
+{
+	if (str.IsEmpty())
+		return true;
+
+	for (size_t i = 0; i < str.Length(); ++i)
+	{
+		if (!(str[i] >= 'A' && str[i] <= 'Z') &&
+			!(str[i] >= '0' && str[i] <= '9') &&
+			str[i] != '_' && str[i] != '-' &&
+			str[i] != '.' && str[i] != ';' &&
+			str[i] != '~')
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool sort_func(const TreeNode& a, const TreeNode& b)
+{
+	if (a.IsDir && !b.IsDir)
+		return true;
+	if (!a.IsDir && b.IsDir)
+		return false;
+	return memcmp(a.Name, b.Name, 32) < 0;
+}
+
+void sort_tree_recursive(TreeNode& node)
+{
+	std::sort(node.Children.begin(), node.Children.end(), sort_func);
+	for (TreeNode& child : node.Children)
+	{
+		sort_tree_recursive(child);
+	}
+}
+
+void print_tree_recursive(const TreeNode& node, int depth=0)
+{
+	wxString msg;
+	for (int i = 0; i < depth; ++i)
+	{
+		msg += "  ";
+	}
+	msg += "+ " + node.Name;
+	Console.WriteLn(msg);
+
+	for (const TreeNode& child : node.Children)
+	{
+		print_tree_recursive(child, depth + 1);
+	}
+}
+
+s32 write_dir_record(
+	s32 dst_sector, 
+	u16 offset,
+	bool isDir,
+	s32 location_sector,
+	s32 location_length,
+	const wxString& identifier)
+{
+	ISO_9660_DRE* dre = (ISO_9660_DRE*)&ISO_dir_sectors[dst_sector * ISO_BLOCK_SIZE + offset];
+	dre->m_m_ExtendedAttributeRecordLength = 0;
+	dre->m_ExtendLocation_LSB = as_lil(location_sector);
+	dre->m_ExtendLocation_MSB = as_big(location_sector);
+	dre->m_FileFlags = isDir ? ISO_FLAG_DIR : 0;
+	dre->m_DataLength_LSB = as_lil(location_length);
+	dre->m_DataLength_MSB = as_big(location_length);
+	dre->m_DateYear = 0;
+	dre->m_DateMonth = 0;
+	dre->m_DateDay = 0;
+	dre->m_DateHour = 0;
+	dre->m_DateMinute = 0;
+	dre->m_DateSecond = 0;
+	dre->m_DateTimeZone = 0;
+	dre->m_FileUnitSize = 0;
+	dre->m_InterleaveGapSize = 0;
+	dre->m_VolumeSequenceNumber_LSB;
+	dre->m_VolumeSequenceNumber_MSB;
+	dre->m_FileIdentifierLength = u8(wxMin(identifier.Length(), 255 - sizeof(ISO_9660_DRE)));
+	memcpy(&ISO_dir_sectors[dst_sector * ISO_BLOCK_SIZE + offset + sizeof(ISO_9660_DRE)], identifier.c_str().AsChar(), dre->m_FileIdentifierLength);
+	
+	dre->m_EntryLength = sizeof(ISO_9660_DRE) + dre->m_FileIdentifierLength;
+	if (dre->m_EntryLength < 255 && dre->m_EntryLength % 2 != 0)
+	{
+		dre->m_EntryLength++;
+	}
+
+	// return written size
+	return dre->m_EntryLength;
+}
+
+s32 write_tree_dir_sector_recursive(const TreeNode& node, s32 local_sector, u16 offset)
+{
+	if (!node.IsDir)
+	{
+		ASSERT(local_sector >= 0);
+		s32 new_sector = ISO_sector_count++;
+		ISO_sector_to_path.emplace(new_sector, node.Path);
+		return write_dir_record(local_sector, offset, node.IsDir, new_sector, node.FileSize, node.Name);
+	}
+	else
+	{
+		s32 child_size = 0;
+		for (const TreeNode& child : node.Children)
+		{
+			child_size += write_tree_dir_sector_recursive(child, local_sector + 1, child_size);
+		}
+
+		if (local_sector < 0)
+		{
+			return child_size;
+		}
+		else
+		{
+			// TODO: check order of ./ and ../
+			//       write proper sizes
+			child_size = write_dir_record(local_sector, offset, node.IsDir, local_sector, child_size, '\0');
+			offset += child_size;
+
+			child_size = write_dir_record(local_sector, offset, node.IsDir, wxMin(local_sector - 1, 0), child_size, '\1');
+			offset += child_size;
+
+			child_size = write_dir_record(local_sector, offset, node.IsDir, local_sector + 1, child_size, node.Name);
+			offset += child_size;
+
+			return child_size;
+		}
+	}
+}
+
 void CALLBACK DIRclose()
 {
 	watcher.RemoveAll();
+
+	if (ISO_dir_sectors != nullptr)
+	{
+		delete[] ISO_dir_sectors;
+		ISO_dir_sectors = nullptr;
+	}
+
+	ISO_sector_to_path.clear();
 }
 
 s32 CALLBACK DIRopen(const char* pPath)
 {
 	DIRclose(); // just in case
 
-	if ((pPath == NULL) || (pPath[0] == 0))
+	if ((pPath == nullptr) || (pPath[0] == 0))
 	{
 		Console.Error("CDVDdir Error: No path specified.");
 		return -1;
@@ -172,10 +385,123 @@ s32 CALLBACK DIRopen(const char* pPath)
 	size_t numFiles = wxDir::GetAllFiles(path, &files);
 	if (numFiles == 0)
 	{
-		Console.Error("CDVDdir Error: Directory '%s' doesn't contain any files!", pPath);
+		wxString msg = wxString::Format("CDVDdir Error: Directory '%s' doesn't contain any files!", pPath);
+		Console.Error(msg.c_str().AsChar());
+		wxMessageBox(msg, "Error", wxICON_ERROR | wxOK);
 		DIRclose();
 		return -1;
 	}
+
+	wxString msg;
+	bool validTokens = true;
+
+	Console.WriteLn("Opening Directory as ISO: %s", path);
+	ISO_sector_count = 20;
+
+	TreeNode root;
+	root.Name = "ROOT";
+	root.IsDir = true;
+
+	// Parse path array and build directory tree
+	u32 numDirs = 0;
+	for (size_t i = 0; i < numFiles; ++i)
+	{
+		wxString file = files[i];
+		file.Replace(path, "");
+		if (file.StartsWith(DIRECTORY_SEPARATOR))
+		{
+			file = file.SubString(1, file.Length());
+		}
+
+		if (file.Length() > 255)
+		{
+			msg += wxString::Format("Path '%s' exceeds max character length of 255!\n", file);
+			continue;
+		}
+
+		wxStringTokenizer tokens(file, DIRECTORY_SEPARATOR);
+		size_t numTokens = tokens.CountTokens();
+		if (numTokens > 8)
+		{
+			msg += wxString::Format("Path '%s' exceeds max directory depth of 8!\n", file);
+			continue;
+		}
+
+		TreeNode* current = &root;
+		for (u8 i = 0; tokens.HasMoreTokens(); ++i)
+		{
+			wxString n = tokens.GetNextToken();
+			if (n.Length() > 30)
+			{
+				msg += wxString::Format("Path '%s' contains a token with more than 30 characters!\n", file);
+				validTokens = false;
+			}
+
+			if (!is_strD(n))
+			{
+				msg += wxString::Format("Path '%s' contains a token containing other characters than [A-Z], [0-9], '.'!\n", file);
+				validTokens = false;
+			}
+
+			if (!validTokens)
+				break;
+
+			TreeNode* child = nullptr;
+			for (size_t j = 0; j < current->Children.size(); ++j)
+			{
+				if (memcmp(n.c_str().AsChar(), current->Children[j].Name, wxMin(n.Length(), 32)) == 0)
+				{
+					child = &current->Children[j];
+					break;
+				}
+			}
+			if (child == nullptr)
+			{
+				TreeNode entry;
+				entry.Name = n;
+				entry.Path = files[i];
+				entry.IsDir = i < (numTokens - 1);
+				if (entry.IsDir)
+				{
+					numDirs++;
+
+					// Each directory record entry requires it's own sector
+					ISO_sector_count++;
+				}
+				else
+				{
+					// TODO: open file and grab file size
+					entry.FileSize = 0;
+				}
+
+				child = &current->Children.emplace_back(std::move(entry));
+			}
+
+			current = child;
+		}
+	}
+
+	if (!validTokens)
+	{
+		Console.Warning(msg.c_str().AsChar());
+		wxMessageBox(msg, "Warning", wxICON_WARNING | wxOK);
+	}
+
+	if (numDirs > 65535)
+	{
+		wxString msg = wxString::Format("CDVDdir Error: ISO 9660 just allows for a maximum of 65535 directories, but %d were found!", numFiles);
+		Console.Error(msg.c_str().AsChar());
+		wxMessageBox(msg, "Error", wxICON_ERROR | wxOK);
+		DIRclose();
+		return -1;
+	}
+
+	sort_tree_recursive(root);
+	print_tree_recursive(root);
+
+	ISO_dir_sectors = new u8[numDirs * ISO_BLOCK_SIZE];
+	memset(ISO_dir_sectors, 0, numDirs * ISO_BLOCK_SIZE);
+	write_tree_dir_sector_recursive(root, -1, 0);
 
 	memset(ISO_header, 0, sizeof(ISO_header));
 	ISO_9660_PVD* pvd = (ISO_9660_PVD*)&ISO_header[0];
@@ -187,49 +513,51 @@ s32 CALLBACK DIRopen(const char* pPath)
 	fill_str(pvd->m_SystemIdentifier, 32, "PLAYSTATION");
 	fill_str(pvd->m_VolumeIdentifier, 32, "1");
 
+	fill_str(pvd->m_PublisherIdentifier, 128, "PCSX2 DIR READER PLUGIN");
+
 	// number of blocks (sectors)
-	pvd->m_VolumeSpaceSize_LSB = as_little((s32)4096);
-	pvd->m_VolumeSpaceSize_MSB = as_big((s32)4096);
+	pvd->m_VolumeSpaceSize_LSB = as_lil((s32)ISO_sector_count);
+	pvd->m_VolumeSpaceSize_MSB = as_big((s32)ISO_sector_count);
 
 	// number of discs
-	pvd->m_VolumeSetSize_LSB = as_little((s16)1);
+	pvd->m_VolumeSetSize_LSB = as_lil((s16)1);
 	pvd->m_VolumeSetSize_MSB = as_big((s16)1);
 
 	// number of this disc
-	pvd->m_VolumeSequenceNumber_LSB = as_little((s16)1);
+	pvd->m_VolumeSequenceNumber_LSB = as_lil((s16)1);
 	pvd->m_VolumeSequenceNumber_MSB = as_big((s16)1);
 
 	// block (sector) size
-	pvd->m_LogicalBlockSize_LSB = as_little((s16)2048);
-	pvd->m_LogicalBlockSize_MSB = as_big((s16)2048);
+	pvd->m_LogicalBlockSize_LSB = as_lil((s16)ISO_BLOCK_SIZE);
+	pvd->m_LogicalBlockSize_MSB = as_big((s16)ISO_BLOCK_SIZE);
 
 
-	pvd->m_PathTableSize_LSB;
-	pvd->m_PathTableSize_MSB;
-	pvd->m_LPathTableSector_LSB;
-	pvd->m_OptionalLPathTableSector_LSB;
-	pvd->m_MPathTableSector_MSB;
-	pvd->m_OptionalMPathTableSector_MSB;
-	pvd->m_RootDirectoryEntry[34];
-	pvd->m_VolumeSetIdentifier[128];
-	pvd->m_PublisherIdentifier[128];
-	pvd->m_DataPreparerIdentifier[128];
-	pvd->m_ApplicationIdentifier[128];
-	pvd->m_CopyrightFileIdentifier[37];
-	pvd->m_AbstractFileIdentifier[37];
-	pvd->m_BibliographicFileIdentifier[37];
-	pvd->m_CreationDateTime[17];
-	pvd->m_ModificationDateTime[17];
-	pvd->m_ExpirationDateTime[17];
-	pvd->m_EffectiveDateTime[17];
-	pvd->m_FileStructureVersion;
+	//pvd->m_PathTableSize_LSB;
+	//pvd->m_PathTableSize_MSB;
+	//pvd->m_LPathTableSector_LSB;
+	//pvd->m_OptionalLPathTableSector_LSB;
+	//pvd->m_MPathTableSector_MSB;
+	//pvd->m_OptionalMPathTableSector_MSB;
+	//pvd->m_RootDirectoryEntry[34];
+	//pvd->m_VolumeSetIdentifier[128];
+	//pvd->m_PublisherIdentifier[128];
+	//pvd->m_DataPreparerIdentifier[128];
+	//pvd->m_ApplicationIdentifier[128];
+	//pvd->m_CopyrightFileIdentifier[37];
+	//pvd->m_AbstractFileIdentifier[37];
+	//pvd->m_BibliographicFileIdentifier[37];
+	//pvd->m_CreationDateTime[17];
+	//pvd->m_ModificationDateTime[17];
+	//pvd->m_ExpirationDateTime[17];
+	//pvd->m_EffectiveDateTime[17];
+	//pvd->m_FileStructureVersion;
 
-	for (size_t i = 0; i < numFiles; ++i)
-	{
-		wxString file = files[i];
-		Console.WriteLn("Found File: %s", file.c_str().AsChar());
-	}
 
+	// Volume Descriptor Set Terminator
+	ISO_9660_PVD* vdst = (ISO_9660_PVD*)&ISO_header[1];
+	vdst->m_TypeCode = 255;
+	memcpy(pvd->m_StandardIdentifier, "CD001", 5);
+	pvd->m_Version = 1;
 
 	cdtype = CDVD_TYPE_PS2DVD;
 	layer1start = -1;
